@@ -1,0 +1,88 @@
+# certmgr configuration
+#
+# This file declares the desired state of DNS records and TLS certificates
+# for domains under a single zone. certmgr reconciles live DNS against this
+# file on every run, adding, updating, and removing records as needed.
+#
+# Certificates are issued and renewed via Let's Encrypt using DNS-01
+# challenges. Only domains with cert: true will have certificates managed.
+
+# Let's Encrypt account email
+email: you@example.com
+
+dns:
+  # Address of the authoritative BIND nameserver.
+  # This should be the WireGuard-side IP of your DNS server.
+  server: 10.10.10.1
+
+  # The zone managed by this tool. certmgr owns all A, MX, and CNAME
+  # records in this zone — records not listed below will be removed.
+  zone: x.mc0e.net
+
+  # Path to a TSIG key file in standard BIND format (as produced by
+  # tsig-keygen). This same file can be used directly in your BIND
+  # named.conf, which avoids any risk of key mismatch.
+  tsig_key_file: ~/.config/certmgr/certbot-key
+
+wireguard:
+  # Path to the wg-quick config file for the tunnel to the DNS server.
+  # Used by certmgr-wg only; certmgr itself assumes the tunnel is already up.
+  config: ~/.config/certmgr/wg-cert.conf
+
+lego:
+  # Directory where lego stores certificates and account data.
+  path: ~/.local/share/certmgr/certs
+
+  # Renew certificates with fewer than this many days remaining.
+  # Default: 30
+  renew_days: 30
+
+# Domains to manage. certmgr owns all A, MX, and CNAME records in the zone;
+# any records present in DNS but not listed here will be deleted.
+#
+# Each entry has:
+#   domain  - the fully qualified domain name (trailing dot optional)
+#   cert    - true to issue/renew a TLS certificate for this domain
+#   rr      - list of resource records, each as [TYPE, value, ...]
+#
+# Record types supported:
+#   [A, <ip>]                        - address record
+#   [MX, <host1>, <host2>, ...]      - mail exchange; hosts are assigned
+#                                      priorities 10, 20, 30, ... in order
+#   [CNAME, <target>]                - canonical name; cannot coexist with
+#                                      other record types for the same domain
+#
+# MX and CNAME targets may be given with or without a trailing dot;
+# certmgr will always use fully-qualified names in DNS.
+
+domains:
+  # Zone apex — MX only, no certificate
+  - domain: x.mc0e.net
+    cert: false
+    rr:
+      - [MX, mail.x.mc0e.net]
+
+  # A host with an address record and a certificate
+  - domain: a.x.mc0e.net
+    cert: true
+    rr:
+      - [A, 192.168.1.10]
+
+  # A host with an address record, multiple MX entries, and a certificate
+  - domain: b.x.mc0e.net
+    cert: true
+    rr:
+      - [A, 192.168.1.20]
+      - [MX, primary-mail.mc0e.net, backup-mail.mc0e.net]
+
+  # A CNAME alias — no certificate (cert would be for the target, not this name)
+  - domain: www.x.mc0e.net
+    cert: false
+    rr:
+      - [CNAME, a.x.mc0e.net]
+
+  # DNS entry only, no certificate
+  - domain: c.x.mc0e.net
+    cert: false
+    rr:
+      - [A, 192.168.1.30]
