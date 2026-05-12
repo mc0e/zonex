@@ -314,6 +314,10 @@ reconcile_certs() {
 
     local cert_domains=()
 
+    TSIG_KEY_NAME=$(awk '/^key /{gsub(/"/,"",$2); print $2}' "$TSIG_KEY_FILE")
+    TSIG_ALGORITHM=$(awk '/algorithm /{gsub(/;/,"",$2); print $2}' "$TSIG_KEY_FILE")
+    TSIG_SECRET=$(awk '/secret /{gsub(/[";]/,"",$2); print $2}' "$TSIG_KEY_FILE")
+
     for (( i=0; i<domain_count; i++ )); do
         local domain want_cert
         domain=$(cfg_r ".domains[$i].domain")
@@ -325,9 +329,10 @@ reconcile_certs() {
         local days
         days=$(cert_days_remaining "$domain")
 
-        export ZONERECONCILE_DNS_SERVER="$DNS_SERVER"
-        export ZONERECONCILE_TSIG_KEY="$TSIG_KEY_FILE"
-        export ZONERECONCILE_DNS_ZONE="$DNS_ZONE"
+        export RFC2136_NAMESERVER="${DNS_SERVER}:53"
+        export RFC2136_TSIG_KEY="$TSIG_KEY_NAME"
+        export RFC2136_TSIG_SECRET="$TSIG_SECRET"
+        export RFC2136_TSIG_ALGORITHM="${TSIG_ALGORITHM}."
 
         if [[ $days -lt 0 ]]; then
             log "Issuing new certificate for $domain"
@@ -337,8 +342,7 @@ reconcile_certs() {
                 --path "$LEGO_PATH" \
                 --domains "$domain" \
                 --accept-tos \
-                run \
-                --run-hook "$(dirname "$0")/acme-auth.sh"
+                run
         elif [[ $days -le $CERT_RENEW_DAYS ]]; then
             log "Renewing certificate for $domain ($days days remaining)"
             lego_run \
@@ -347,8 +351,7 @@ reconcile_certs() {
                 --path "$LEGO_PATH" \
                 --domains "$domain" \
                 renew \
-                --days "$CERT_RENEW_DAYS" \
-                --renew-hook "$(dirname "$0")/acme-auth.sh"
+                --days "$CERT_RENEW_DAYS"
         else
             log "Certificate for $domain is valid ($days days remaining)"
         fi
@@ -358,6 +361,7 @@ reconcile_certs() {
     if [[ -d "$LEGO_PATH/certificates" ]]; then
         for cert_file in "$LEGO_PATH/certificates/"*.crt; do
             [[ -f "$cert_file" ]] || continue
+            [[ "$cert_file" == *.issuer.crt ]] && continue
             local on_disk
             on_disk=$(basename "$cert_file" .crt)
             local found=0
