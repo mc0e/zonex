@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# zonereconcile-wg - WireGuard tunnel wrapper for zonereconcile
+#
+# DESCRIPTION:
+#   Brings up a WireGuard tunnel, runs zonereconcile as the unprivileged user
+#   who owns the config, then tears down the tunnel. Designed to be run as
+#   root (e.g. via cron or sudo) so that wg-quick can manage the tunnel
+#   without requiring the user to have persistent elevated privileges.
+#
+# USAGE:
+#   zonereconcile-wg [OPTIONS]
+#
+# OPTIONS:
+#   -c, --config FILE     Path to zonereconcile config file
+#                         (default: ~/.config/zonereconcile/config.yaml,
+#                         resolved relative to SUDO_USER's home if run via sudo)
+#   -w, --wg-config FILE  Path to WireGuard config file
+#                         (default: wg-cert.conf in the same directory as the
+#                         zonereconcile config file)
+#   -u, --user USER       Run zonereconcile as USER (default: $SUDO_USER or $USER)
+#   -q, --quiet           Suppress all output on success (suitable for cron)
+#   -h, --help            Show this help message
+#
+#   Additional options are passed through to zonereconcile (e.g. --dry-run,
+#   --verbose).
+#
+# CRON EXAMPLE (in root's crontab, or via sudo):
+#   0 3 * * 1  /usr/local/bin/zonereconcile-wg --quiet
+#
+# SUDOERS EXAMPLE (to allow a user to run this without a password):
+#   username ALL=(root) NOPASSWD: /usr/local/bin/zonereconcile-wg
+#
+# DEPENDENCIES:
+#   - wg-quick        (apt install wireguard-tools)
+#   - zonereconcile   (must be on PATH)
+#
+set -euo pipefail
+
+# --- colours (suppressed in quiet mode) ---
+QUIET=0
+
+# Parse --quiet/-q early so we can use it in log()
+for arg in "$@"; do
+    [[ "$arg" == "--quiet" || "$arg" == "-q" ]] && QUIET=1
+done
+
+if [[ -t 2 && $QUIET -eq 0 ]]; then
+    C_INFO='\033[0;32m'
+    C_WARN='\033[0;33m'
+    C_ERR='\033[0;31m'
+    C_RESET='\033[0m'
+else
+    C_INFO='' C_WARN='' C_ERR='' C_RESET=''
+fi
+
+log()  { [[ $QUIET -eq 0 ]] && echo -e "${C_INFO}[INFO]${C_RESET}  $*" >&2 || true; }
+warn() { [[ $QUIET -eq 0 ]] && echo -e "${C_WARN}[WARN]${C_RESET}  $*" >&2 || true; }
+err()  { echo -e "${C_ERR}[ERROR]${C_RESET} $*" >&2; exit 1; }
+
+usage() {
+    sed -n '/^# DESCRIPTION:/,/^[^#]/{ /^#/{ s/^# \{0,1\}//; p } }' "$0"
+    exit 0
+}
+
+# --- root check ---
+if [[ $EUID -ne 0 ]]; then
+    echo "zonereconcile-wg must be run as root (it manages WireGuard tunnels)." >&2
+    echo "Try: sudo zonereconcile-wg $*" >&2
+    exit 1
+fi
+
+# --- argument parsing ---
+RUN_AS="${SUDO_USER:-}"
+CONFIG_FILE=""
+WG_CONFIG=""
+PASSTHROUGH_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -u|--user)      RUN_AS="$2"; shift 2 ;;
+        -c|--config)    CONFIG_FILE="$2"; shift 2 ;;
+        -w|--wg-config) WG_CONFIG="$2"; shift 2 ;;
+        -q|--quiet)     PASSTHROUGH_ARGS+=("--quiet"); shift ;;
+        -h|--help)      usage ;;
+        *)              PASSTHROUGH_ARGS+=("$1"); shift ;;
+    esac
+done
+
+if [[ -z "$RUN_AS" ]]; then
+    err "Cannot determine which user to run zonereconcile as. Use --user or run via sudo."
+fi
+
+if [[ "$RUN_AS" == "root" ]]; then
+    err "Refusing to run zonereconcile as root. Use --user to specify an unprivileged user."
+fi
+
+# Resolve user's home directory
+USER_HOME=$(getent passwd "$RUN_AS" | cut -d: -f6) \
+    || err "User not found: $RUN_AS"
+
+if [[ -z "$CONFIG_FILE" ]]; then
+    CONFIG_FILE="${USER_HOME}/.config/zonereconcile/config.yaml"
+fi
+
+[[ -f "$CONFIG_FILE" ]] || err "Config file not found: $CONFIG_FILE"
+
+# Default WireGuard config: wg-cert.conf alongside the zonereconcile config file
+if [[ -z "$WG_CONFIG" ]]; then
+    WG_CONFIG="$(dirname "$CONFIG_FILE")/wg-cert.conf"
+fi
+
+[[ -f "$WG_CONFIG" ]] || err "WireGuard config not found: $WG_CONFIG (use --wg-config to specify a different path)"
+
+# Derive interface name from config filename (wg-quick convention)
+WG_IFACE=$(basename "$WG_CONFIG" .conf)
+
+# --- WireGuard tunnel lifecycle ---
+WG_UP=0
+if [[ $QUIET -eq 1 ]]; then
+    wg-quick up "$WG_CONFIG" >/dev/null 2>&1 && WG_UP=1 \
+        || err "Failed to bring up WireGuard interface $WG_IFACE"
+else
+    log "Bringing up WireGuard interface $WG_IFACE (for DNS access)"
+    wg-quick up "$WG_CONFIG" && WG_UP=1 \
+        || err "Failed to bring up WireGuard interface $WG_IFACE"
+fi
+
+teardown() {
+    if [[ $WG_UP -eq 1 ]]; then
+        if [[ $QUIET -eq 1 ]]; then
+            wg-quick down "$WG_CONFIG" >/dev/null 2>&1 \
+                || echo "[WARN] Failed to bring down $WG_IFACE — may need manual cleanup" >&2
+        else
+            log "Tearing down WireGuard interface $WG_IFACE"
+            wg-quick down "$WG_CONFIG" >/dev/null 2>&1 \
+                || warn "Failed to bring down $WG_IFACE — may need manual cleanup"
+        fi
+    fi
+}
+trap teardown EXIT
+
+# --- run zonereconcile as unprivileged user ---
+log "Running zonereconcile as $RUN_AS"
+
+ZONERECONCILE_ARGS=(--config "$CONFIG_FILE")
+ZONERECONCILE_ARGS+=("${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}")
+
+sudo -u "$RUN_AS" zonereconcile "${ZONERECONCILE_ARGS[@]}"

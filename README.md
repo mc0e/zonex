@@ -1,9 +1,9 @@
-# certmgr
+# zonereconcile
 
 Declarative DNS record and TLS certificate manager for a self-hosted BIND zone.
 
 Declare the DNS records and certificates you want in a single YAML file.
-`certmgr` reconciles live DNS against that file on every run — adding,
+`zonereconcile` reconciles live DNS against that file on every run — adding,
 updating, and removing records — and ensures TLS certificates are issued and
 renewed via Let's Encrypt.
 
@@ -16,18 +16,18 @@ tunnel.
 ## How it works
 
 - **DNS** is managed via RFC 2136 dynamic updates (`nsupdate`), authenticated
-  with a TSIG key. On each run, certmgr fetches the current zone state via
+  with a TSIG key. On each run, zonereconcile fetches the current zone state via
   AXFR, diffs it against the config, and applies the minimum set of changes.
-  Records not listed in the config are deleted — certmgr owns the zone.
+  Records not listed in the config are deleted — zonereconcile owns the zone.
 
 - **Certificates** are issued and renewed via [lego](https://github.com/go-acme/lego)
   using DNS-01 challenges. The same TSIG key and nameserver are used to
   temporarily add `_acme-challenge` TXT records during validation.
 
 - **WireGuard** tunnel management is handled by a separate wrapper script
-  (`certmgr-wg`) that requires root. `certmgr` itself runs as a normal user
-  and assumes the tunnel is already up. This separation allows `certmgr` to
-  be run interactively during development while `certmgr-wg` is used from
+  (`zonereconcile-wg`) that requires root. `zonereconcile` itself runs as a normal user
+  and assumes the tunnel is already up. This separation allows `zonereconcile` to
+  be run interactively during development while `zonereconcile-wg` is used from
   cron.
 
 ---
@@ -55,7 +55,7 @@ Your zone must be configured to:
    zone "x.mc0e.net" {
        type master;
        file "x.mc0e.net.zone";
-       allow-transfer { key certmgr-key; };
+       allow-transfer { key zonereconcile-key; };
    };
    ```
 
@@ -64,7 +64,7 @@ Your zone must be configured to:
 
    ```
    update-policy {
-       grant certmgr-key zonesub ANY;
+       grant zonereconcile-key zonesub ANY;
    };
    ```
 
@@ -72,7 +72,7 @@ Your zone must be configured to:
    `tsig-keygen`):
 
    ```
-   include "/etc/bind/certmgr-key.conf";
+   include "/etc/bind/zonereconcile-key.conf";
    ```
 
 ---
@@ -82,48 +82,48 @@ Your zone must be configured to:
 1. Copy the scripts to somewhere on your PATH:
 
    ```bash
-   cp certmgr acme-auth.sh acme-cleanup.sh ~/.local/bin/
-   sudo cp certmgr-wg /usr/local/bin/
-   chmod +x ~/.local/bin/certmgr ~/.local/bin/acme-auth.sh \
-            ~/.local/bin/acme-cleanup.sh /usr/local/bin/certmgr-wg
+   cp zonereconcile acme-auth.sh acme-cleanup.sh ~/.local/bin/
+   sudo cp zonereconcile-wg /usr/local/bin/
+   chmod +x ~/.local/bin/zonereconcile ~/.local/bin/acme-auth.sh \
+            ~/.local/bin/acme-cleanup.sh /usr/local/bin/zonereconcile-wg
    ```
 
 2. Create the config directory:
 
    ```bash
-   mkdir -p ~/.config/certmgr
+   mkdir -p ~/.config/zonereconcile
    ```
 
 3. Generate a TSIG key (if you don't already have one):
 
    ```bash
-   tsig-keygen certmgr-key > ~/.config/certmgr/certbot-key
-   chmod 600 ~/.config/certmgr/certbot-key
+   tsig-keygen zonereconcile-key > ~/.config/zonereconcile/certbot-key
+   chmod 600 ~/.config/zonereconcile/certbot-key
    ```
 
    Copy the same file to your BIND server and include it in `named.conf`.
 
-4. Place your WireGuard config at `~/.config/certmgr/wg-cert.conf`
+4. Place your WireGuard config at `~/.config/zonereconcile/wg-cert.conf`
    (or set `wireguard.config` in `config.yaml` to point elsewhere).
 
 5. Copy and edit the config file:
 
    ```bash
-   cp config.yaml ~/.config/certmgr/config.yaml
-   $EDITOR ~/.config/certmgr/config.yaml
+   cp config.yaml ~/.config/zonereconcile/config.yaml
+   $EDITOR ~/.config/zonereconcile/config.yaml
    ```
 
 6. Create the lego output directory:
 
    ```bash
-   mkdir -p ~/.local/share/certmgr/certs
+   mkdir -p ~/.local/share/zonereconcile/certs
    ```
 
-7. Allow `certmgr-wg` to be run via sudo without a password (optional, needed
+7. Allow `zonereconcile-wg` to be run via sudo without a password (optional, needed
    for cron). Add to `/etc/sudoers` via `visudo`:
 
    ```
-   yourusername ALL=(root) NOPASSWD: /usr/local/bin/certmgr-wg
+   yourusername ALL=(root) NOPASSWD: /usr/local/bin/zonereconcile-wg
    ```
 
 ---
@@ -154,7 +154,7 @@ domains:
 | `MX` | `[MX, <host>, ...]` | Multiple hosts assigned priorities 10, 20, 30, ... in order |
 | `CNAME` | `[CNAME, <target>]` | Cannot coexist with other record types for the same domain |
 
-Trailing dots on hostnames are optional — certmgr always uses fully-qualified
+Trailing dots on hostnames are optional — zonereconcile always uses fully-qualified
 names when talking to DNS.
 
 ---
@@ -164,18 +164,18 @@ names when talking to DNS.
 ### Run manually (tunnel already up)
 
 ```bash
-certmgr
-certmgr --dry-run          # preview changes without applying
-certmgr --verbose          # show detailed output
-certmgr --config /path/to/config.yaml
+zonereconcile
+zonereconcile --dry-run          # preview changes without applying
+zonereconcile --verbose          # show detailed output
+zonereconcile --config /path/to/config.yaml
 ```
 
 ### Run with WireGuard management (typical use)
 
 ```bash
-sudo certmgr-wg
-sudo certmgr-wg --dry-run  # passes --dry-run through to certmgr
-sudo certmgr-wg --quiet
+sudo zonereconcile-wg
+sudo zonereconcile-wg --dry-run  # passes --dry-run through to zonereconcile
+sudo zonereconcile-wg --quiet
 ```
 
 ### Cron (weekly, Monday at 03:00)
@@ -184,13 +184,13 @@ Add to root's crontab (`sudo crontab -e`), or your own crontab if sudoers
 is configured for NOPASSWD:
 
 ```
-0 3 * * 1  /usr/local/bin/certmgr-wg --quiet
+0 3 * * 1  /usr/local/bin/zonereconcile-wg --quiet
 ```
 
 Or from your user crontab with sudo:
 
 ```
-0 3 * * 1  sudo /usr/local/bin/certmgr-wg --quiet
+0 3 * * 1  sudo /usr/local/bin/zonereconcile-wg --quiet
 ```
 
 ---
@@ -200,7 +200,7 @@ Or from your user crontab with sudo:
 Certificates are stored by lego under the `lego.path` directory:
 
 ```
-~/.local/share/certmgr/certs/
+~/.local/share/zonereconcile/certs/
 └── certificates/
     ├── a.x.mc0e.net.crt        # full chain
     ├── a.x.mc0e.net.key        # private key
@@ -217,8 +217,8 @@ Projects should reference these paths directly. Per-project deployment
 
 | File | Description |
 |---|---|
-| `certmgr` | Main reconciler — DNS and certificate management |
-| `certmgr-wg` | WireGuard wrapper — runs as root, calls certmgr as user |
+| `zonereconcile` | Main reconciler — DNS and certificate management |
+| `zonereconcile-wg` | WireGuard wrapper — runs as root, calls zonereconcile as user |
 | `acme-auth.sh` | lego DNS-01 auth hook — adds `_acme-challenge` TXT record |
 | `acme-cleanup.sh` | lego DNS-01 cleanup hook — removes `_acme-challenge` TXT record |
-| `config.yaml` | Configuration file (copy to `~/.config/certmgr/config.yaml`) |
+| `config.yaml` | Configuration file (copy to `~/.config/zonereconcile/config.yaml`) |

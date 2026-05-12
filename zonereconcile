@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# certmgr - Declarative DNS and TLS certificate manager
+# zonereconcile - Declarative DNS and TLS certificate manager
 #
 # DESCRIPTION:
 #   Reconciles DNS records and TLS certificates against a YAML config file.
@@ -7,37 +7,43 @@
 #   a TSIG key. Certificates are issued and renewed via Let's Encrypt using
 #   lego with DNS-01 challenges.
 #
-#   This script runs as a normal user. It requires the WireGuard tunnel to
-#   the DNS server to already be up. Use certmgr-wg to manage the tunnel
-#   automatically (e.g. from cron).
+#   This script runs as a normal user. It assumes the DNS server is reachable
+#   \u2014 either directly over the network, or because a WireGuard tunnel is
+#   already up. Use zonereconcile-wg to manage the tunnel automatically
+#   (e.g. from cron).
 #
 # USAGE:
-#   certmgr [OPTIONS]
+#   zonereconcile [OPTIONS]
 #
 # OPTIONS:
-#   -c, --config FILE   Path to config file (default: ~/.config/certmgr/config.yaml)
-#   -n, --dry-run       Print planned changes without applying them
-#   -q, --quiet         Suppress informational output
-#   -v, --verbose       Show detailed operation output
-#   -h, --help          Show this help message
+#   -c, --config FILE       Path to config file
+#                           (default: ~/.config/zonereconcile/config.yaml)
+#   -s, --dns-server IP     Override the DNS server IP from config.
+#                           Use when the server is reachable at a different
+#                           address than configured (e.g. over a VPN tunnel).
+#   -n, --dry-run           Print planned changes without applying them
+#   -q, --quiet             Suppress informational output
+#   -v, --verbose           Show detailed operation output
+#   -h, --help              Show this help message
 #
 # DEPENDENCIES:
-#   - yq        (https://github.com/mikefarah/yq) for YAML parsing
+#   - yq        (apt install yq) for YAML parsing
 #   - lego      (https://github.com/go-acme/lego) for certificate management
-#   - nsupdate  (bind9utils package) for DNS updates
-#   - dig       (dnsutils package) for AXFR zone transfers
+#   - nsupdate  (apt install bind9-dnsutils) for DNS updates
+#   - dig       (apt install bind9-dnsutils) for AXFR zone transfers
 #   - openssl   for certificate expiry checks
 #
 # CONFIGURATION:
 #   See config.yaml for the configuration file format.
 #
-# CRON EXAMPLE (via certmgr-wg):
-#   0 3 * * 1  /usr/local/bin/certmgr-wg
+# CRON EXAMPLE (via zonereconcile-wg):
+#   0 3 * * 1  /usr/local/bin/zonereconcile-wg --quiet
 #
 set -euo pipefail
 
 # --- defaults ---
-CONFIG_FILE="${HOME}/.config/certmgr/config.yaml"
+CONFIG_FILE="${HOME}/.config/zonereconcile/config.yaml"
+DNS_SERVER_OVERRIDE=""
 DRY_RUN=0
 QUIET=0
 VERBOSE=0
@@ -67,11 +73,12 @@ usage() {
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -c|--config)  CONFIG_FILE="$2"; shift 2 ;;
-        -n|--dry-run) DRY_RUN=1; shift ;;
-        -q|--quiet)   QUIET=1; shift ;;
-        -v|--verbose) VERBOSE=1; shift ;;
-        -h|--help)    usage ;;
+        -c|--config)     CONFIG_FILE="$2"; shift 2 ;;
+        -s|--dns-server) DNS_SERVER_OVERRIDE="$2"; shift 2 ;;
+        -n|--dry-run)    DRY_RUN=1; shift ;;
+        -q|--quiet)      QUIET=1; shift ;;
+        -v|--verbose)    VERBOSE=1; shift ;;
+        -h|--help)       usage ;;
         *) err "Unknown option: $1" ;;
     esac
 done
@@ -81,17 +88,21 @@ for cmd in yq lego nsupdate dig openssl; do
     command -v "$cmd" >/dev/null 2>&1 || err "Required command not found: $cmd"
 done
 
+# --- config helpers ---
+# cfg_r: raw string output (for strings, paths)
+# cfg:   JSON output (for booleans, integers)
+cfg_r() { yq -r "$1" "$CONFIG_FILE"; }
+cfg()   { yq    "$1" "$CONFIG_FILE"; }
+
 # --- load config ---
 [[ -f "$CONFIG_FILE" ]] || err "Config file not found: $CONFIG_FILE"
 
-cfg() { yq e "$1" "$CONFIG_FILE"; }
-
-EMAIL=$(cfg '.email')
-DNS_SERVER=$(cfg '.dns.server')
-DNS_ZONE=$(cfg '.dns.zone')
-TSIG_KEY_FILE=$(cfg '.dns.tsig_key_file')
+EMAIL=$(cfg_r '.email')
+DNS_SERVER=$(cfg_r '.dns.server')
+DNS_ZONE=$(cfg_r '.dns.zone')
+TSIG_KEY_FILE=$(cfg_r '.dns.tsig_key_file')
 TSIG_KEY_FILE="${TSIG_KEY_FILE/#\~/$HOME}"
-LEGO_PATH=$(cfg '.lego.path')
+LEGO_PATH=$(cfg_r '.lego.path')
 LEGO_PATH="${LEGO_PATH/#\~/$HOME}"
 CERT_RENEW_DAYS=$(cfg '.lego.renew_days // 30')
 
@@ -103,6 +114,12 @@ CERT_RENEW_DAYS=$(cfg '.lego.renew_days // 30')
 
 [[ -f "$TSIG_KEY_FILE" ]] || err "TSIG key file not found: $TSIG_KEY_FILE"
 
+# Apply DNS server override if provided (e.g. WireGuard tunnel IP)
+if [[ -n "$DNS_SERVER_OVERRIDE" ]]; then
+    verbose "Overriding DNS server: $DNS_SERVER -> $DNS_SERVER_OVERRIDE"
+    DNS_SERVER="$DNS_SERVER_OVERRIDE"
+fi
+
 # Ensure trailing dot on zone name
 [[ "$DNS_ZONE" == *. ]] || DNS_ZONE="${DNS_ZONE}."
 
@@ -111,12 +128,12 @@ validate_config() {
     log "Validating config..."
     local domain types
     while IFS= read -r domain; do
-        types=$(yq e ".domains[] | select(.domain == \"$domain\") | .rr[][0]" "$CONFIG_FILE" 2>/dev/null || true)
+        types=$(cfg_r ".domains[] | select(.domain == \"$domain\") | .rr[][0]" 2>/dev/null || true)
         if echo "$types" | grep -q "^CNAME$" && \
            echo "$types" | grep -qv "^CNAME$"; then
             err "Domain '$domain' has CNAME mixed with other record types"
         fi
-    done < <(cfg '.domains[].domain')
+    done < <(cfg_r '.domains[].domain')
 }
 
 # --- normalise a DNS name to fully qualified ---
@@ -159,35 +176,37 @@ axfr_fetch() {
 # Parse desired records from config.
 # Outputs lines in the same form as axfr_fetch.
 config_records() {
-    local domain fqdn_domain rr_count rr_type
     local domain_count
-    domain_count=$(yq e '.domains | length' "$CONFIG_FILE")
+    domain_count=$(cfg '.domains | length')
 
     for (( i=0; i<domain_count; i++ )); do
-        domain=$(yq e ".domains[$i].domain" "$CONFIG_FILE")
+        local domain fqdn_domain rr_count
+        domain=$(cfg_r ".domains[$i].domain")
         fqdn_domain=$(fqdn "$domain")
-        rr_count=$(yq e ".domains[$i].rr | length" "$CONFIG_FILE")
+        rr_count=$(cfg ".domains[$i].rr | length")
 
         local mx_priority=10
         for (( j=0; j<rr_count; j++ )); do
-            rr_type=$(yq e ".domains[$i].rr[$j][0]" "$CONFIG_FILE")
+            local rr_type
+            rr_type=$(cfg_r ".domains[$i].rr[$j][0]")
             case "$rr_type" in
                 A)
                     local ip
-                    ip=$(yq e ".domains[$i].rr[$j][1]" "$CONFIG_FILE")
+                    ip=$(cfg_r ".domains[$i].rr[$j][1]")
                     echo "$fqdn_domain A $ip"
                     ;;
                 CNAME)
                     local target
-                    target=$(yq e ".domains[$i].rr[$j][1]" "$CONFIG_FILE")
+                    target=$(cfg_r ".domains[$i].rr[$j][1]")
                     target=$(fqdn "$target")
                     echo "$fqdn_domain CNAME $target"
                     ;;
                 MX)
-                    local mx_count mx_val
-                    mx_count=$(yq e ".domains[$i].rr[$j] | length - 1" "$CONFIG_FILE")
+                    local mx_count
+                    mx_count=$(cfg ".domains[$i].rr[$j] | length - 1")
                     for (( k=0; k<mx_count; k++ )); do
-                        mx_val=$(yq e ".domains[$i].rr[$j][$((k+1))]" "$CONFIG_FILE")
+                        local mx_val
+                        mx_val=$(cfg_r ".domains[$i].rr[$j][$((k+1))]")
                         mx_val=$(fqdn "$mx_val")
                         echo "$fqdn_domain MX $mx_priority $mx_val"
                         (( mx_priority += 10 ))
@@ -201,9 +220,6 @@ config_records() {
 reconcile_dns() {
     log "Reconciling DNS records..."
 
-    local current desired
-
-    # Read current and desired into associative arrays keyed by "<fqdn> <type> <rdata>"
     declare -A current_records desired_records
 
     while IFS= read -r line; do
@@ -218,7 +234,6 @@ reconcile_dns() {
         verbose "Desired: $line"
     done < <(config_records)
 
-    # Records to add: in desired but not in current
     local adds=() deletes=()
 
     for record in "${!desired_records[@]}"; do
@@ -227,7 +242,6 @@ reconcile_dns() {
         fi
     done
 
-    # Records to delete: in current but not in desired
     for record in "${!current_records[@]}"; do
         if [[ -z "${desired_records[$record]+x}" ]]; then
             deletes+=("$record")
@@ -239,7 +253,6 @@ reconcile_dns() {
         return
     fi
 
-    # Build a single nsupdate transaction
     local cmds
     cmds="server ${DNS_SERVER}
 zone ${DNS_ZONE}"
@@ -297,20 +310,24 @@ reconcile_certs() {
     log "Reconciling certificates..."
 
     local domain_count
-    domain_count=$(yq e '.domains | length' "$CONFIG_FILE")
+    domain_count=$(cfg '.domains | length')
 
     local cert_domains=()
 
     for (( i=0; i<domain_count; i++ )); do
         local domain want_cert
-        domain=$(yq e ".domains[$i].domain" "$CONFIG_FILE")
-        want_cert=$(yq e ".domains[$i].cert // false" "$CONFIG_FILE")
+        domain=$(cfg_r ".domains[$i].domain")
+        want_cert=$(cfg ".domains[$i].cert // false")
 
         [[ "$want_cert" == "true" ]] || continue
         cert_domains+=("$domain")
 
         local days
         days=$(cert_days_remaining "$domain")
+
+        export ZONERECONCILE_DNS_SERVER="$DNS_SERVER"
+        export ZONERECONCILE_TSIG_KEY="$TSIG_KEY_FILE"
+        export ZONERECONCILE_DNS_ZONE="$DNS_ZONE"
 
         if [[ $days -lt 0 ]]; then
             log "Issuing new certificate for $domain"
@@ -363,3 +380,5 @@ reconcile_dns
 reconcile_certs
 
 log "Done"
+ENDOFSCRIPT
+chmod +x /home/claude/certmgr/zonereconcile
