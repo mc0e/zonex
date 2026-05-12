@@ -11,10 +11,10 @@
 #   LEGO_CERT_PATH       - path to the certificate (on renewal)
 #   LEGO_CERT_KEY_PATH   - path to the certificate key (on renewal)
 #
-# Required environment variables (set by certmgr):
-#   CERTMGR_DNS_SERVER   - nameserver address (host or host:port)
-#   CERTMGR_TSIG_KEY     - path to TSIG key file
-#   CERTMGR_DNS_ZONE     - DNS zone (e.g. x.mc0e.net)
+# Required environment variables (set by zonereconcile):
+#   ZONERECONCILE_DNS_SERVER   - nameserver address (host or host:port)
+#   ZONERECONCILE_TSIG_KEY     - path to TSIG key file
+#   ZONERECONCILE_DNS_ZONE     - DNS zone (e.g. x.mc0e.net)
 #
 set -euo pipefail
 
@@ -22,20 +22,19 @@ log() { echo "[acme-cleanup] $*" >&2; }
 err() { echo "[acme-cleanup] ERROR: $*" >&2; exit 1; }
 
 : "${LEGO_DOMAIN:?LEGO_DOMAIN not set}"
-: "${CERTMGR_DNS_SERVER:?CERTMGR_DNS_SERVER not set}"
-: "${CERTMGR_TSIG_KEY:?CERTMGR_TSIG_KEY not set}"
-: "${CERTMGR_DNS_ZONE:?CERTMGR_DNS_ZONE not set}"
+: "${ZONERECONCILE_DNS_SERVER:?ZONERECONCILE_DNS_SERVER not set}"
+: "${ZONERECONCILE_TSIG_KEY:?ZONERECONCILE_TSIG_KEY not set}"
+: "${ZONERECONCILE_DNS_ZONE:?ZONERECONCILE_DNS_ZONE not set}"
 
 RECORD="_acme-challenge.${LEGO_DOMAIN}."
 
 log "Removing TXT record $RECORD"
 
-nsupdate -k "$CERTMGR_TSIG_KEY" <<EOF
-server ${CERTMGR_DNS_SERVER}
-zone ${CERTMGR_DNS_ZONE}
+nsupdate -k "$ZONERECONCILE_TSIG_KEY" <<EOF
+server ${ZONERECONCILE_DNS_SERVER}
+zone ${ZONERECONCILE_DNS_ZONE}
 update delete ${RECORD} TXT
 send
 EOF
 
 log "Done"
-
