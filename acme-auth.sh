@@ -11,10 +11,10 @@
 #   LEGO_CERT_PATH       - path to the certificate (on renewal)
 #   LEGO_CERT_KEY_PATH   - path to the certificate key (on renewal)
 #
-# Required environment variables (set by zonereconcile):
-#   ZONERECONCILE_DNS_SERVER   - nameserver address (host or host:port)
-#   ZONERECONCILE_TSIG_KEY     - path to TSIG key file
-#   ZONERECONCILE_DNS_ZONE     - DNS zone (e.g. x.mc0e.net)
+# Required environment variables (set by ZONEX):
+#   ZONEX_DNS_SERVER   - nameserver address (host or host:port)
+#   ZONEX_TSIG_KEY     - path to TSIG key file
+#   ZONEX_DNS_ZONE     - DNS zone (e.g. x.mc0e.net)
 #
 set -euo pipefail
 
@@ -23,18 +23,18 @@ err() { echo "[acme-auth] ERROR: $*" >&2; exit 1; }
 
 : "${LEGO_DOMAIN:?LEGO_DOMAIN not set}"
 : "${LEGO_VALIDATION:?LEGO_VALIDATION not set}"
-: "${ZONERECONCILE_DNS_SERVER:?ZONERECONCILE_DNS_SERVER not set}"
-: "${ZONERECONCILE_TSIG_KEY:?ZONERECONCILE_TSIG_KEY not set}"
-: "${ZONERECONCILE_DNS_ZONE:?ZONERECONCILE_DNS_ZONE not set}"
+: "${ZONEX_DNS_SERVER:?ZONEX_DNS_SERVER not set}"
+: "${ZONEX_TSIG_KEY:?ZONEX_TSIG_KEY not set}"
+: "${ZONEX_DNS_ZONE:?ZONEX_DNS_ZONE not set}"
 
 RECORD="_acme-challenge.${LEGO_DOMAIN}."
 VALUE="${LEGO_VALIDATION}"
 
 log "Adding TXT record $RECORD"
 
-nsupdate -k "$ZONERECONCILE_TSIG_KEY" <<EOF
-server ${ZONERECONCILE_DNS_SERVER}
-zone ${ZONERECONCILE_DNS_ZONE}
+nsupdate -k "$ZONEX_TSIG_KEY" <<EOF
+server ${ZONEX_DNS_SERVER}
+zone ${ZONEX_DNS_ZONE}
 update delete ${RECORD} TXT
 update add ${RECORD} 60 TXT "${VALUE}"
 send
@@ -44,7 +44,7 @@ EOF
 log "Waiting for DNS propagation..."
 
 for i in {1..30}; do
-    if dig +short TXT "${RECORD}" @"${ZONERECONCILE_DNS_SERVER}" \
+    if dig +short TXT "${RECORD}" @"${ZONEX_DNS_SERVER}" \
             | grep -q "${VALUE}"; then
         log "DNS record is visible after $((i * 2)) seconds"
         exit 0

@@ -11,7 +11,7 @@
 #   LEGO_CERT_PATH       - path to the certificate (on renewal)
 #   LEGO_CERT_KEY_PATH   - path to the certificate key (on renewal)
 #
-# Required environment variables (set by zonereconcile):
+# Required environment variables (set by zonex):
 #   ZONERECONCILE_DNS_SERVER   - nameserver address (host or host:port)
 #   ZONERECONCILE_TSIG_KEY     - path to TSIG key file
 #   ZONERECONCILE_DNS_ZONE     - DNS zone (e.g. x.mc0e.net)

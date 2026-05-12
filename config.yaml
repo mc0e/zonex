@@ -1,7 +1,7 @@
-# zonereconcile configuration
+# zonex configuration
 #
 # This file declares the desired state of DNS records and TLS certificates
-# for domains under a single zone. zonereconcile reconciles live DNS against this
+# for domains under a single zone. zonex reconciles live DNS against this
 # file on every run, adding, updating, and removing records as needed.
 #
 # Certificates are issued and renewed via Let's Encrypt using DNS-01
@@ -15,29 +15,29 @@ dns:
   # This should be the WireGuard-side IP of your DNS server.
   server: 10.10.10.1
 
-  # The zone managed by this tool. zonereconcile owns all A, MX, and CNAME
+  # The zone managed by this tool. zonex owns all A, MX, and CNAME
   # records in this zone — records not listed below will be removed.
   zone: x.mc0e.net
 
   # Path to a TSIG key file in standard BIND format (as produced by
   # tsig-keygen). This same file can be used directly in your BIND
   # named.conf, which avoids any risk of key mismatch.
-  tsig_key_file: ~/.config/zonereconcile/zonereconcile-key
+  tsig_key_file: ~/.config/zonex/zonex-key
 
 wireguard:
   # Path to the wg-quick config file for the tunnel to the DNS server.
-  # Used by zonereconcile-wg only; zonereconcile itself assumes the tunnel is already up.
-  config: ~/.config/zonereconcile/wg-cert.conf
+  # Used by zonex-wg only; zonex itself assumes the tunnel is already up.
+  config: ~/.config/zonex/wg-cert.conf
 
 lego:
   # Directory where lego stores certificates and account data.
-  path: ~/.local/share/zonereconcile/certs
+  path: ~/.local/share/zonex/certs
 
   # Renew certificates with fewer than this many days remaining.
   # Default: 30
   renew_days: 30
 
-# Domains to manage. zonereconcile owns all A, MX, and CNAME records in the zone;
+# Domains to manage. zonex owns all A, MX, and CNAME records in the zone;
 # any records present in DNS but not listed here will be deleted.
 #
 # Each entry has:
@@ -53,7 +53,7 @@ lego:
 #                                      other record types for the same domain
 #
 # MX and CNAME targets may be given with or without a trailing dot;
-# zonereconcile will always use fully-qualified names in DNS.
+# zonex will always use fully-qualified names in DNS.
 
 domains:
   # Zone apex — MX only, no certificate

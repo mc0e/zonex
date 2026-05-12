@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# zonereconcile - Declarative DNS and TLS certificate manager
+# zonex - Declarative DNS and TLS certificate manager
 #
 # DESCRIPTION:
 #   Reconciles DNS records and TLS certificates against a YAML config file.
@@ -9,15 +9,15 @@
 #
 #   This script runs as a normal user. It assumes the DNS server is reachable
 #   \u2014 either directly over the network, or because a WireGuard tunnel is
-#   already up. Use zonereconcile-wg to manage the tunnel automatically
+#   already up. Use zonex-wg to manage the tunnel automatically
 #   (e.g. from cron).
 #
 # USAGE:
-#   zonereconcile [OPTIONS]
+#   zonex [OPTIONS]
 #
 # OPTIONS:
 #   -c, --config FILE       Path to config file
-#                           (default: ~/.config/zonereconcile/config.yaml)
+#                           (default: ~/.config/zonex/config.yaml)
 #   -s, --dns-server IP     Override the DNS server IP from config.
 #                           Use when the server is reachable at a different
 #                           address than configured (e.g. over a VPN tunnel).
@@ -36,13 +36,13 @@
 # CONFIGURATION:
 #   See config.yaml for the configuration file format.
 #
-# CRON EXAMPLE (via zonereconcile-wg):
-#   0 3 * * 1  /usr/local/bin/zonereconcile-wg --quiet
+# CRON EXAMPLE (via zonex-wg):
+#   0 3 * * 1  /usr/local/bin/zonex-wg --quiet
 #
 set -euo pipefail
 
 # --- defaults ---
-CONFIG_FILE="${HOME}/.config/zonereconcile/config.yaml"
+CONFIG_FILE="${HOME}/.config/zonex/config.yaml"
 DNS_SERVER_OVERRIDE=""
 DRY_RUN=0
 QUIET=0
@@ -385,4 +385,4 @@ reconcile_certs
 
 log "Done"
 ENDOFSCRIPT
-chmod +x /home/claude/certmgr/zonereconcile
+chmod +x /home/claude/certmgr/zonex

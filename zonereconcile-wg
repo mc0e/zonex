@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
-# zonereconcile-wg - WireGuard tunnel wrapper for zonereconcile
+# zonex-wg - WireGuard tunnel wrapper for zonex
 #
 # DESCRIPTION:
-#   Brings up a WireGuard tunnel, runs zonereconcile as the unprivileged user
+#   Brings up a WireGuard tunnel, runs zonex as the unprivileged user
 #   who owns the config, then tears down the tunnel. Designed to be run as
 #   root (e.g. via cron or sudo) so that wg-quick can manage the tunnel
 #   without requiring the user to have persistent elevated privileges.
 #
 # USAGE:
-#   zonereconcile-wg [OPTIONS]
+#   zonex-wg [OPTIONS]
 #
 # OPTIONS:
-#   -c, --config FILE     Path to zonereconcile config file
-#                         (default: ~/.config/zonereconcile/config.yaml,
+#   -c, --config FILE     Path to zonex config file
+#                         (default: ~/.config/zonex/config.yaml,
 #                         resolved relative to SUDO_USER's home if run via sudo)
 #   -w, --wg-config FILE  Path to WireGuard config file
 #                         (default: wg-cert.conf in the same directory as the
-#                         zonereconcile config file)
-#   -u, --user USER       Run zonereconcile as USER (default: $SUDO_USER or $USER)
+#                         zonex config file)
+#   -u, --user USER       Run zonex as USER (default: $SUDO_USER or $USER)
 #   -q, --quiet           Suppress all output on success (suitable for cron)
 #   -h, --help            Show this help message
 #
-#   Additional options are passed through to zonereconcile (e.g. --dry-run,
+#   Additional options are passed through to zonex (e.g. --dry-run,
 #   --verbose).
 #
 # CRON EXAMPLE (in root's crontab, or via sudo):
-#   0 3 * * 1  /usr/local/bin/zonereconcile-wg --quiet
+#   0 3 * * 1  /usr/local/bin/zonex-wg --quiet
 #
 # SUDOERS EXAMPLE (to allow a user to run this without a password):
-#   username ALL=(root) NOPASSWD: /usr/local/bin/zonereconcile-wg
+#   username ALL=(root) NOPASSWD: /usr/local/bin/zonex-wg
 #
 # DEPENDENCIES:
 #   - wg-quick        (apt install wireguard-tools)
-#   - zonereconcile   (must be on PATH)
+#   - zonex   (must be on PATH)
 #
 set -euo pipefail
 
@@ -64,8 +64,8 @@ usage() {
 
 # --- root check ---
 if [[ $EUID -ne 0 ]]; then
-    echo "zonereconcile-wg must be run as root (it manages WireGuard tunnels)." >&2
-    echo "Try: sudo zonereconcile-wg $*" >&2
+    echo "zonex-wg must be run as root (it manages WireGuard tunnels)." >&2
+    echo "Try: sudo zonex-wg $*" >&2
     exit 1
 fi
 
@@ -87,11 +87,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$RUN_AS" ]]; then
-    err "Cannot determine which user to run zonereconcile as. Use --user or run via sudo."
+    err "Cannot determine which user to run zonex as. Use --user or run via sudo."
 fi
 
 if [[ "$RUN_AS" == "root" ]]; then
-    err "Refusing to run zonereconcile as root. Use --user to specify an unprivileged user."
+    err "Refusing to run zonex as root. Use --user to specify an unprivileged user."
 fi
 
 # Resolve user's home directory
@@ -99,12 +99,12 @@ USER_HOME=$(getent passwd "$RUN_AS" | cut -d: -f6) \
     || err "User not found: $RUN_AS"
 
 if [[ -z "$CONFIG_FILE" ]]; then
-    CONFIG_FILE="${USER_HOME}/.config/zonereconcile/config.yaml"
+    CONFIG_FILE="${USER_HOME}/.config/zonex/config.yaml"
 fi
 
 [[ -f "$CONFIG_FILE" ]] || err "Config file not found: $CONFIG_FILE"
 
-# Default WireGuard config: wg-cert.conf alongside the zonereconcile config file
+# Default WireGuard config: wg-cert.conf alongside the zonex config file
 if [[ -z "$WG_CONFIG" ]]; then
     WG_CONFIG="$(dirname "$CONFIG_FILE")/wg-cert.conf"
 fi
@@ -139,10 +139,10 @@ teardown() {
 }
 trap teardown EXIT
 
-# --- run zonereconcile as unprivileged user ---
-log "Running zonereconcile as $RUN_AS"
+# --- run zonex as unprivileged user ---
+log "Running zonex as $RUN_AS"
 
-ZONERECONCILE_ARGS=(--config "$CONFIG_FILE")
-ZONERECONCILE_ARGS+=("${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}")
+ZONEX_ARGS=(--config "$CONFIG_FILE")
+ZONEX_ARGS+=("${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}")
 
-sudo -u "$RUN_AS" zonereconcile "${ZONERECONCILE_ARGS[@]}"
+sudo -u "$RUN_AS" zonex "${ZONEX_ARGS[@]}"

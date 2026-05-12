@@ -58,9 +58,9 @@ sufficient:
 
 ```
 zone "x.mc0e.net" {
-    allow-transfer { key zonereconcile-key; };
+    allow-transfer { key zonex-key; };
     update-policy {
-        grant zonereconcile-key zonesub ANY;
+        grant zonex-key zonesub ANY;
     };
 };
 ```
