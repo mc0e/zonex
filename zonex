@@ -384,5 +384,3 @@ reconcile_dns
 reconcile_certs
 
 log "Done"
-ENDOFSCRIPT
-chmod +x /home/claude/certmgr/zonex
